@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Register{% endblock %}
+{% block body %}
+<h1>Create an account</h1>
+<form class="stack" method="post">
+  {{ csrf_input() }}
+  <label>Username
+    <input name="username" value="{{ form.get('username', '') }}" autocomplete="username" autofocus required>
+  </label>
+  <label>Password
+    <input name="password" type="password" autocomplete="new-password" minlength="10" required>
+  </label>
+  <p class="hint">At least 10 characters. A few random words works better than a clever short one.</p>
+  <label>Mobile number
+    <input name="phone" type="tel" value="{{ form.get('phone', '') }}" placeholder="+15551234567" autocomplete="tel" required>
+  </label>
+  <p class="hint">Codes are texted to this number every time you sign in.</p>
+  <button type="submit">Create account</button>
+</form>
+<p class="alt">Already registered? <a href="{{ url_for('login') }}">Sign in</a></p>
+{% endblock %}

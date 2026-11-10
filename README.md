@@ -1,139 +1,117 @@
-#  Secure Login
+# Secure Login
 
-![GitHub top language](https://img.shields.io/github/languages/top/Micheleregina2022/cybersecurityProject?color=pink&label=PYTHON&logo=python&logoColor=%23cb567c)
-![GitHub](https://img.shields.io/github/license/Micheleregina2022/cybersecurityProject?color=pink)
+A small Flask login system where signing in takes two things: your password, then a code texted to your phone. Passwords are stored as bcrypt hashes, codes come from Twilio Verify, and accounts lock after repeated failures.
 
+![Sign-in page](assets/login.png)
 
-# About project 
+It started as a prototype by Michele Regina ([cybersecurityProject](https://github.com/Micheleregina2022/cybersecurityProject)): bcrypt hashing plus a Twilio 2FA form. This version keeps that core and fills in what a real login needs.
 
-This project consists of a secure login system developed in Python. So far, the basic structure of registration and name and password verification has been developed. The first security mechanism consists of encrypting passwords using _bcrypt_, a data encryption library.
-Then two-factor authentication (2FA) was implemented.
+## What it does
 
-
-## Examples
-
-* create_table(): Creates a table in the SQLite database to store user information if the table doesn't exist.
-
-* create_password_hash(passw): Generates an encrypted password hash using the bcrypt library.
-
-* register_user(name, passw, number_phone): Registers a new user in the database, storing the name, encrypted password, and phone number.
-
-* verify_hash_passw(passw, hash_passw): Verifies if a password matches an encrypted password hash.
-
-* verify_user(name, passw): Verifies if the provided username and password correspond to a registered user in the database.
-
-* create_verify_service(): Creates a verification service using the Twilio API and returns the service_sid for the created service.
-
-* send_verification_sms(number_phone): Sends a verification request via SMS to the provided phone number using the Twilio verification service.
-
-Flask Routes:
-
-* /: Initial route that renders the index.html template.
-
-* /register: Route for registering a new user. Form data is extracted and validated before calling the register_user function to insert the user details into the database.
-
-* /verify: Route for authenticating a user. Form data is extracted and verified by calling the verify_user function. If the authentication is successful, a success message is rendered; otherwise, a failure message is displayed.
-
-* /twofactor: Route for performing two-factor authentication (2FA). The phone number and OTP code are extracted from the form.
-The send_verification_sms function is called to send the verification request via SMS. 
-Then, the provided OTP code is verified, and a message indicating whether the verification was approved or failed is rendered.
-
-#### *note: project under development and resolving problems in production*
-
-
-### Interface
-A simple visualization, because the focus is on the backend. <br/>
-![layout](assets/layout.png)
-
-# Technologies
-
-- Python 3.9.11
-- Librarys Python: sqlite3, bcrypt, flask.render_template, twilio.rest.Client, requests.
-- Framework Flask 2.3.2
-- SQlite 3.35.5.
-- API Twilio
-- DB Browser for SQLite Version 3.12.2
-- IDE PyCharm 2022.3.1 (Community Edition)
-
-
-# How to run the project
- 
-Make sure you have Python installed. 
-Also, install Pipenv if you don't already have it by running the following command:
-
-*pip install pipenv*
-
-<br/>
-
-1. Clone the repository:
-
-    *git clone: https://github.com/Micheleregina2022/cybersecurityProject.git*
-
-
-2. Navigate to the project directory:
-
-    *cd repository-name*
-
-
-3. Install project dependencies using Pipenv:
-
-    *pipenv install --dev*
-
-
-4. Activate the Pipenv virtual environment:
-
-    *pipenv shell*
-
-
-5. Install dependencies:
-
-   *pip install -r requirements.txt*
-
-
-6. Run the application:
-
-    *python app.py*
-
-## Using the API and Testing the Project
-
-To use the API and test the project, please follow the instructions below:
-
-1. Twilio Account Setup:
-
-If you haven't already, create a Twilio account at Twilio.com (it's free!).
-Retrieve your Account SID and Auth Token from the Twilio dashboard. 
-
-2. Environment Setup:
-
-Open the app.py file in a text editor.
-
-Replace the values of the account_sid, auth_token, and service_sid variables with your Twilio account information.
-
-Open the terminal and navigate to the project folder.
-
-Start the server by running the following command:
-
- *python app.py*
-
-The server will run on port 5000.
-
-3. Using the Project:
-
-Open your web browser and visit http://localhost:5000 to access the project's home page.
-
-You will see fields for registration and login.
-
-To test the two-factor verification, enter your phone number and the OTP (verification code) received via SMS. 
-
-Based on the verification, you will receive a message indicating whether access is granted or denied.
-
-
-
-
-
-
-
-
-
-
-
+- **Two-step sign-in.** Password first, then an SMS code checked against Twilio Verify. Neither step alone gives you a session.
+- **Password rules.** 10+ characters, at most 72 bytes (bcrypt's limit), no common passwords, nothing containing your username. Length over symbol rules on purpose.
+- **Lockout.** Five failures in a row, wrong passwords or wrong codes, lock the account for 15 minutes. The sign-in form gives the same answer for an unknown user, a wrong password and a locked account.
+- **Rate limits** on sign-in, registration, code entry and code resend.
+- **Change password** and **reset by SMS.** Either one signs the account out on every other device.
+- **Recent activity** on the account page: sign-ins, failures, lockouts and password changes with the address they came from.
+- **Hardening.** CSRF tokens on every POST, a CSP with no inline script or style, `HttpOnly` / `SameSite=Lax` cookies, `no-store` on account pages, 30 minute idle timeout.
+
+![Account page](assets/dashboard.png)
+
+## Run it
+
+You need Python 3.9 or newer.
+
+```
+python -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+cp .env.example .env               # Windows: copy .env.example .env
+```
+
+Put a secret in `.env`:
+
+```
+python -c "import secrets; print(secrets.token_hex(32))"
+```
+
+Then:
+
+```
+python login_crypt/app.py
+```
+
+and open http://127.0.0.1:5000. With the default `SMS_BACKEND=console`, codes are printed in the terminal instead of sent, so you can try everything without a Twilio account.
+
+### Real SMS with Twilio
+
+1. In the Twilio console, create a **Verify service** and note its SID (starts with `VA`).
+2. In `.env`, set:
+
+   ```
+   SMS_BACKEND=twilio
+   TWILIO_ACCOUNT_SID=AC...
+   TWILIO_AUTH_TOKEN=...
+   TWILIO_VERIFY_SERVICE_SID=VA...
+   ```
+
+Trial Twilio accounts can only text numbers you've verified in the console. Phone numbers are entered with a country code, like `+15551234567`.
+
+### Settings
+
+| Variable | Default | |
+| --- | --- | --- |
+| `SECRET_KEY` | none, required | Signs the session cookie. |
+| `SMS_BACKEND` | `console` | `console` or `twilio`. |
+| `TWILIO_*` | empty | Needed when `SMS_BACKEND=twilio`. |
+| `COOKIE_SECURE` | `0` | Set to `1` behind HTTPS. Also renames the cookie to `__Host-session` and sends HSTS. |
+| `DATABASE` | `login_crypt/register.db` | SQLite file. |
+| `FLASK_DEBUG` | `0` | Never leave on in production. |
+
+## Tests
+
+```
+pip install -r requirements-dev.txt
+pytest
+```
+
+The suite replaces Twilio with a fake, so nothing sends a text. The one thing it can't prove is a live call to Twilio; try that once with your own Verify service.
+
+## How a sign-in works
+
+```
+password ok? ──no──► failure counted, one generic message
+     │yes
+     ▼
+text a code ──► /login/verify ──wrong──► failure counted (5 = locked)
+                     │right
+                     ▼
+               session issued, failures cleared, event logged
+```
+
+## Layout
+
+```
+login_crypt/
+  app.py          routes and the app factory
+  users.py        password hashing, lockout, accounts
+  validators.py   password, username and phone rules
+  sms.py          Twilio Verify, plus a console stand-in
+  ratelimit.py    sliding-window limiter
+  hardening.py    CSRF and response headers
+  events.py       activity log
+  db.py           SQLite connection, schema, upgrades
+  config.py       environment settings
+  templates/  static/
+tests/
+```
+
+## Things to know before deploying
+
+- **Rotate any Twilio token that was ever committed.** Earlier versions of this repo had credentials in `app.py`; they are still in git history.
+- **Rate limits live in process memory.** Fine for one worker. With several, each counts separately; use a shared store.
+- **Behind a reverse proxy** `request.remote_addr` is the proxy's address, which breaks per-IP limits and the activity log. Wrap the app in Werkzeug's `ProxyFix` and configure it for your proxy.
+- **SMS is the weak factor.** SIM-swap attacks exist, and SMS reset means whoever controls the number controls the account. An authenticator app is the next step up.
+- **Client addresses are stored** in the activity log (last 200 events per user). That can be personal data where you live.
+- **Accounts from the earlier version** keep working: the new columns are added on startup. They need a phone number on file to receive codes.
+- Registration reveals whether a username is taken. Avoiding that needs email confirmation, which this project doesn't have.

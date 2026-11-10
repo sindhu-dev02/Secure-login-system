@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Reset password{% endblock %}
+{% block body %}
+<h1>Reset your password</h1>
+<p class="lede">Enter your username and we'll text a code to the phone number on the account.</p>
+<form class="stack" method="post">
+  {{ csrf_input() }}
+  <label>Username
+    <input name="username" autocomplete="username" autofocus required>
+  </label>
+  <button type="submit">Send code</button>
+</form>
+<p class="alt"><a href="{{ url_for('login') }}">Back to sign in</a></p>
+{% endblock %}

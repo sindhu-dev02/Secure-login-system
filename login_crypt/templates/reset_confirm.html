@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Choose a new password{% endblock %}
+{% block body %}
+<h1>Choose a new password</h1>
+<form class="stack" method="post">
+  {{ csrf_input() }}
+  <label>Code from the text message
+    <input class="code-input" name="code" inputmode="numeric" autocomplete="one-time-code"
+           pattern="[0-9]{4,10}" maxlength="10" autofocus required>
+  </label>
+  <label>New password
+    <input name="new" type="password" autocomplete="new-password" minlength="10" required>
+  </label>
+  <label>New password again
+    <input name="again" type="password" autocomplete="new-password" minlength="10" required>
+  </label>
+  <button type="submit">Set new password</button>
+</form>
+<p class="alt"><a href="{{ url_for('reset_request') }}">Start over</a></p>
+{% endblock %}

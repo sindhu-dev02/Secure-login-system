@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block title %}{{ heading }}{% endblock %}
+{% block body %}
+<h1>{{ heading }}</h1>
+<p class="lede">{{ detail }}</p>
+<p><a href="{{ url_for('index') }}">Back to the start</a></p>
+{% endblock %}

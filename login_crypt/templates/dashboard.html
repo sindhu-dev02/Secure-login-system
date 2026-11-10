@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Account{% endblock %}
+{% block body %}
+<h1>Signed in as {{ g.user['name'] }}</h1>
+<dl class="facts">
+  <dt>Phone</dt>
+  <dd class="mono">{{ phone }}</dd>
+  {% if g.user['created_at'] %}
+  <dt>Member since</dt>
+  <dd>{{ g.user['created_at'][:10] }}</dd>
+  {% endif %}
+</dl>
+
+<h2>Recent activity</h2>
+<table class="log">
+  <thead>
+    <tr><th>When</th><th>What</th><th>From</th></tr>
+  </thead>
+  <tbody>
+    {% for item in activity %}
+    <tr>
+      <td class="mono">{{ item.at }}</td>
+      <td>{{ item.what }}</td>
+      <td class="mono">{{ item.ip }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+<p class="hint">If something here isn't you, change your password. That signs out every other device.</p>
+
+<ul class="actions">
+  <li><a href="{{ url_for('change_password') }}">Change password</a></li>
+</ul>
+{% endblock %}

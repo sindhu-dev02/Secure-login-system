@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}{% endblock %} / secure login</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <header class="bar">
+    <a class="mark" href="{{ url_for('index') }}">secure<span>/</span>login</a>
+    {% if g.user %}
+    <form class="bar-user" method="post" action="{{ url_for('logout') }}">
+      {{ csrf_input() }}
+      <span>{{ g.user['name'] }}</span>
+      <button class="link" type="submit">Sign out</button>
+    </form>
+    {% endif %}
+  </header>
+
+  <main>
+    {% for category, message in get_flashed_messages(with_categories=true) %}
+    <p class="note {{ category }}" role="status">{{ message }}</p>
+    {% endfor %}
+    {% block body %}{% endblock %}
+  </main>
+</body>
+</html>

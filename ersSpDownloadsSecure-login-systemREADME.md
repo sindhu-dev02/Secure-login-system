@@ -1,0 +1,498 @@
+warning: in the working copy of 'C:\Users\Sp\Downloads\Secure-login-system\login_crypt\app.py', LF will be replaced by CRLF the next time Git touches it
+[1mdiff --git "a/C:\\Users\\Sp\\Secure-login-system\\login_crypt\\app.py" "b/C:\\Users\\Sp\\Downloads\\Secure-login-system\\login_crypt\\app.py"[m
+[1mindex 3ff2fa0..47db3f8 100644[m
+[1m--- "a/C:\\Users\\Sp\\Secure-login-system\\login_crypt\\app.py"[m
+[1m+++ "b/C:\\Users\\Sp\\Downloads\\Secure-login-system\\login_crypt\\app.py"[m
+[36m@@ -1,153 +1,341 @@[m
+[31m-from twilio.rest import Client[m
+[31m-from flask import Flask, render_template, request[m
+[31m-import sqlite3[m
+[31m-import bcrypt[m
+[31m-import requests[m
+[31m-[m
+[31m-[m
+[31m-app = Flask(__name__)[m
+[31m-[m
+[31m-account_sid = 'AC81bbdd0121e419f77661c57e067b7883'[m
+[31m-auth_token = '43c579e185e7608467f61cd169585530'[m
+[31m-service_sid = 'VAc29e600fc81669f26f319833cf1ffc64'[m
+[31m-[m
+[31m-[m
+[31m-def create_table():[m
+[31m-    conn = sqlite3.connect('register.db')[m
+[31m-    cursor = conn.cursor()[m
+[31m-[m
+[31m-    cursor.execute('''[m
+[31m-            CREATE TABLE IF NOT EXISTS user ([m
+[31m-                id INTEGER PRIMARY KEY AUTOINCREMENT,[m
+[31m-                name TEXT,[m
+[31m-                passw TEXT,[m
+[31m-                number_phone VARCHAR[m
+[31m-            )[m
+[31m-        ''')[m
+[31m-[m
+[31m-    conn.commit()[m
+[31m-    conn.close()[m
+[31m-[m
+[31m-[m
+[31m-def create_password_hash(passw):[m
+[31m-    salt = bcrypt.gensalt()[m
+[31m-    hash_passw = bcrypt.hashpw(passw.encode('utf-8'), salt)[m
+[31m-    return hash_passw.decode('utf-8')[m
+[31m-[m
+[31m-[m
+[31m-def register_user(name, passw, number_phone):[m
+[31m-    conn = sqlite3.connect('register.db')[m
+[31m-    cursor = conn.cursor()[m
+[31m-[m
+[31m-    hash_passw = create_password_hash(passw)[m
+[31m-[m
+[31m-    cursor.execute('INSERT INTO user (name, passw, number_phone) VALUES (?, ?, ?)', (name, hash_passw, number_phone))[m
+[31m-[m
+[31m-    conn.commit()[m
+[31m-    conn.close()[m
+[31m-[m
+[31m-[m
+[31m-def verify_hash_passw(passw, hash_passw):[m
+[31m-    return bcrypt.checkpw(passw.encode('utf-8'), hash_passw.encode('utf-8'))[m
+[31m-[m
+[31m-[m
+[31m-def verify_user(name, passw):[m
+[31m-    conn = sqlite3.connect('register.db')[m
+[31m-    cursor = conn.cursor()[m
+[31m-[m
+[31m-    cursor.execute('SELECT passw FROM user WHERE name = ?', (name,))[m
+[31m-    user = cursor.fetchone()[m
+[31m-[m
+[31m-    conn.close()[m
+[31m-[m
+[31m-    if user is not None:[m
+[31m-        hash_passw = user[0][m
+[31m-        if verify_hash_passw(passw, hash_passw):[m
+[31m-            return True  # Retorna True se a senha estiver correta[m
+[31m-    [m
+[31m-    return False  # Retorna False se o usuário não for encontrado ou a senha estiver incorreta[m
+[31m-[m
+[31m-[m
+[31m-def create_verify_service():[m
+[31m-    url = 'https://verify.twilio.com/v2/Services'[m
+[31m-    headers = {'Content-Type': 'application/x-www-form-urlencoded'}[m
+[31m-    data = {[m
+[31m-        'FriendlyName': 'secureLogin'  # Nome amigável do serviço de verificação[m
+[32m+[m[32mimport functools[m
+[32m+[m[32mimport time[m
+[32m+[m[32mfrom datetime import timedelta[m
+[32m+[m
+[32m+[m[32mfrom flask import Flask, flash, g, redirect, render_template, request, session, url_for[m
+[32m+[m
+[32m+[m[32mimport config[m
+[32m+[m[32mimport db[m
+[32m+[m[32mimport events[m
+[32m+[m[32mimport hardening[m
+[32m+[m[32mimport ratelimit[m
+[32m+[m[32mimport sms[m
+[32m+[m[32mimport users[m
+[32m+[m[32mimport validators[m
+[32m+[m
+[32m+[m[32m# How long a half-finished login (password accepted, code not yet entered) stays valid.[m
+[32m+[m[32mSECOND_FACTOR_WINDOW = 10 * 60[m
+[32m+[m[32mMAX_CODE_TRIES = 5[m
+[32m+[m
+[32m+[m
+[32m+[m[32mdef mask_phone(phone):[m
+[32m+[m[32m    if not phone:[m
+[32m+[m[32m        return "no phone on file"[m
+[32m+[m[32m    return phone[:2] + "•" * max(len(phone) - 6, 0) + phone[-4:][m
+[32m+[m
+[32m+[m
+[32m+[m[32mdef create_app(test_config=None):[m
+[32m+[m[32m    app = Flask(__name__)[m
+[32m+[m[32m    app.config.update([m
+[32m+[m[32m        SECRET_KEY=config.SECRET_KEY,[m
+[32m+[m[32m        DATABASE=config.DATABASE,[m
+[32m+[m[32m        SMS_BACKEND=config.SMS_BACKEND,[m
+[32m+[m[32m        TWILIO_ACCOUNT_SID=config.TWILIO_ACCOUNT_SID,[m
+[32m+[m[32m        TWILIO_AUTH_TOKEN=config.TWILIO_AUTH_TOKEN,[m
+[32m+[m[32m        TWILIO_VERIFY_SERVICE_SID=config.TWILIO_VERIFY_SERVICE_SID,[m
+[32m+[m[32m        BCRYPT_ROUNDS=12,[m
+[32m+[m[32m        SESSION_COOKIE_HTTPONLY=True,[m
+[32m+[m[32m        SESSION_COOKIE_SAMESITE="Lax",[m
+[32m+[m[32m        SESSION_COOKIE_SECURE=config.COOKIE_SECURE,[m
+[32m+[m[32m        PERMANENT_SESSION_LIFETIME=timedelta(minutes=30),[m
+[32m+[m[32m        # name: (hits allowed, window in seconds)[m
+[32m+[m[32m        RATE_LIMITS={[m
+[32m+[m[32m            "login": (10, 60),[m
+[32m+[m[32m            "register": (10, 600),[m
+[32m+[m[32m            "verify": (10, 600),[m
+[32m+[m[32m            "resend": (3, 600),[m
+[32m+[m[32m            "reset": (5, 600),[m
+[32m+[m[32m            "password": (5, 600),[m
+[32m+[m[32m        },[m
+[32m+[m[32m    )[m
+[32m+[m[32m    if test_config:[m
+[32m+[m[32m        app.config.update(test_config)[m
+[32m+[m
+[32m+[m[32m    if not app.config["SECRET_KEY"]:[m
+[32m+[m[32m        raise RuntimeError([m
+[32m+[m[32m            "SECRET_KEY is not set. Generate one with "[m
+[32m+[m[32m            "`python -c \"import secrets; print(secrets.token_hex(32))\"` "[m
+[32m+[m[32m            "and put it in .env"[m
+[32m+[m[32m        )[m
+[32m+[m
+[32m+[m[32m    if app.config["SESSION_COOKIE_SECURE"]:[m
+[32m+[m[32m        # The __Host- prefix makes browsers reject the cookie unless it is Secure,[m
+[32m+[m[32m        # scoped to the exact host and set from "/".[m
+[32m+[m[32m        app.config["SESSION_COOKIE_NAME"] = "__Host-session"[m
+[32m+[m
+[32m+[m[32m    hardening.init_app(app)[m
+[32m+[m[32m    db.init_app(app)[m
+[32m+[m[32m    verifier = sms.build_verifier(app.config)[m
+[32m+[m[32m    limiters = {[m
+[32m+[m[32m        name: ratelimit.RateLimiter(*args) for name, args in app.config["RATE_LIMITS"].items()[m
+     }[m
+[31m-    response = requests.post(url, data=data, auth=(account_sid, auth_token), headers=headers)[m
+[31m-    service_sid = response.json().get('sid')[m
+[31m-    return service_sid[m
+[31m-[m
+[31m-# Envio da solicitação de verificação[m
+[31m-[m
+[31m-[m
+[31m-def send_verification_sms(number_phone):[m
+[31m-    client = Client(account_sid, auth_token)[m
+[31m-    verification = client.verify.v2.services(service_sid) \[m
+[31m-        .verifications \[m
+[31m-        .create(to=number_phone, channel="sms")[m
+[31m-[m
+[31m-    return verification.sid[m
+[31m-[m
+[31m-[m
+[31m-@app.route('/')[m
+[31m-def index():[m
+[31m-    return render_template('index.html')[m
+[31m-[m
+[31m-[m
+[31m-@app.route('/register', methods=['POST'])[m
+[31m-def register():[m
+[31m-    name = request.form['name'][m
+[31m-    passw = request.form['passw'][m
+[31m-    number_phone = request.form.get("number_phone", None)[m
+[31m-[m
+[31m-    if name == '' or passw == '' or number_phone == "":[m
+[31m-        return 'Por favor, preencha todos os campos.'[m
+[31m-[m
+[31m-    create_table()[m
+[31m-    register_user(name, passw, number_phone)[m
+[31m-[m
+[31m-    return render_template('index.html', message1='Usuário cadastrado com sucesso.')[m
+[31m-[m
+[31m-[m
+[31m-@app.route('/verify', methods=['POST'])[m
+[31m-def verify():[m
+[31m-    name = request.form['name'][m
+[31m-    passw = request.form['passw'][m
+[31m-[m
+[31m-    print(f'Nome recebido: {name}')  # Mensagem de depuração para verificar o nome recebido do formulário[m
+[31m-    print(f'Senha recebida: {passw}')  # Mensagem de depuração para verificar a senha recebida do formulário[m
+[31m-[m
+[31m-    if name == '' or passw == '':[m
+[31m-        return 'Preencha todos os campos' [m
+[31m-[m
+[31m-    if verify_user(name, passw):[m
+[31m-        print('Usuário válido.')  # Mensagem de depuração para verificar se o usuário foi validado com sucesso[m
+[31m-        return render_template('index.html', message2='Usuário válido.')[m
+[31m-    else:[m
+[31m-        print('Não encontrado.')  # Mensagem de depuração para verificar se o usuário foi considerado inválido[m
+[31m-        return render_template('index.html', message2='Usuário inválido.')[m
+[31m-[m
+[31m-[m
+[31m-@app.route('/twofactor', methods=['POST'])[m
+[31m-def twofactor():[m
+[31m-    number_phone = request.form['number_phone'][m
+[31m-    otp_code = request.form['otp_code'][m
+[31m-[m
+[31m-    if not number_phone:[m
+[31m-        return render_template('index.html', message='Por favor, insira um número de telefone e um código OTP.')[m
+[31m-[m
+[31m-    client = Client(account_sid, auth_token)[m
+[31m-    verification_check = client.verify.v2.services(service_sid) \[m
+[31m-        .verifications \[m
+[31m-        .create(to=number_phone, channel="sms")[m
+[31m-    if not otp_code:[m
+[31m-        return "invalido"[m
+[31m-    if verification_check.status == 'approved':[m
+[31m-        return render_template('index.html', message='Verificação aprovada. Acesso concedido.')[m
+[31m-    else:[m
+[31m-        return render_template('index.html', message='Verificação falhou. Acesso negado.')[m
+[31m-[m
+ [m
+[31m-if __name__ == '__main__':[m
+[31m-    app.run(debug=True)[m
+[32m+[m[32m    def throttled(bucket, key):[m
+[32m+[m[32m        if limiters[bucket].allow(key):[m
+[32m+[m[32m            return False[m
+[32m+[m[32m        flash("Too many requests. Wait a few minutes and try again.", "error")[m
+[32m+[m[32m        return True[m
+[32m+[m
+[32m+[m[32m    @app.before_request[m
+[32m+[m[32m    def load_user():[m
+[32m+[m[32m        uid = session.get("uid")[m
+[32m+[m[32m        g.user = users.get_by_id(uid) if uid else None[m
+[32m+[m[32m        if g.user is not None and session.get("epoch") != g.user["session_epoch"]:[m
+[32m+[m[32m            g.user = None  # password changed since this session was issued[m
+[32m+[m[32m        if uid and g.user is None:[m
+[32m+[m[32m            session.clear()[m
+[32m+[m
+[32m+[m[32m    def login_required(view):[m
+[32m+[m[32m        @functools.wraps(view)[m
+[32m+[m[32m        def wrapped(*args, **kwargs):[m
+[32m+[m[32m            if g.user is None:[m
+[32m+[m[32m                flash("Sign in to see that page.", "error")[m
+[32m+[m[32m                return redirect(url_for("login"))[m
+[32m+[m[32m            return view(*args, **kwargs)[m
+[32m+[m
+[32m+[m[32m        return wrapped[m
+[32m+[m
+[32m+[m[32m    def send_code(user):[m
+[32m+[m[32m        try:[m
+[32m+[m[32m            verifier.start(user["number_phone"])[m
+[32m+[m[32m        except sms.SMSError as exc:[m
+[32m+[m[32m            flash(str(exc), "error")[m
+[32m+[m[32m            return False[m
+[32m+[m[32m        return True[m
+[32m+[m
+[32m+[m[32m    def pending_user():[m
+[32m+[m[32m        uid = session.get("pending_uid")[m
+[32m+[m[32m        if not uid:[m
+[32m+[m[32m            return None[m
+[32m+[m[32m        if time.time() - session.get("pending_at", 0) > SECOND_FACTOR_WINDOW:[m
+[32m+[m[32m            session.clear()[m
+[32m+[m[32m            flash("That sign-in attempt timed out. Please start again.", "error")[m
+[32m+[m[32m            return None[m
+[32m+[m[32m        return users.get_by_id(uid)[m
+[32m+[m
+[32m+[m[32m    @app.route("/")[m
+[32m+[m[32m    def index():[m
+[32m+[m[32m        return redirect(url_for("dashboard" if g.user else "login"))[m
+[32m+[m
+[32m+[m[32m    @app.route("/register", methods=["GET", "POST"])[m
+[32m+[m[32m    def register():[m
+[32m+[m[32m        if request.method == "POST":[m
+[32m+[m[32m            if throttled("register", request.remote_addr):[m
+[32m+[m[32m                return render_template("register.html", form=request.form), 429[m
+[32m+[m[32m            name = request.form.get("username", "").strip()[m
+[32m+[m[32m            passw = request.form.get("password", "")[m
+[32m+[m[32m            phone = validators.normalize_phone(request.form.get("phone", ""))[m
+[32m+[m[32m            problems = validators.check_registration(name, passw, phone)[m
+[32m+[m[32m            if problems:[m
+[32m+[m[32m                for message in problems:[m
+[32m+[m[32m                    flash(message, "error")[m
+[32m+[m[32m            else:[m
+[32m+[m[32m                try:[m
+[32m+[m[32m                    new_id = users.register_user(name, passw, phone)[m
+[32m+[m[32m                except users.DuplicateUser:[m
+[32m+[m[32m                    flash("That username is taken.", "error")[m
+[32m+[m[32m                else:[m
+[32m+[m[32m                    events.record(new_id, "registered")[m
+[32m+[m[32m                    flash("Account created. Sign in to continue.", "ok")[m
+[32m+[m[32m                    return redirect(url_for("login"))[m
+[32m+[m[32m        return render_template("register.html", form=request.form)[m
+[32m+[m
+[32m+[m[32m    @app.route("/login", methods=["GET", "POST"])[m
+[32m+[m[32m    def login():[m
+[32m+[m[32m        if g.user:[m
+[32m+[m[32m            return redirect(url_for("dashboard"))[m
+[32m+[m[32m        if request.method == "POST":[m
+[32m+[m[32m            if throttled("login", request.remote_addr):[m
+[32m+[m[32m                return render_template("login.html", form=request.form), 429[m
+[32m+[m[32m            name = request.form.get("username", "").strip()[m
+[32m+[m[32m            passw = request.form.get("password", "")[m
+[32m+[m[32m            user = users.verify_user(name, passw)[m
+[32m+[m[32m            if user is None:[m
+[32m+[m[32m                # Same text whether the name is unknown, the password is wrong or[m
+[32m+[m[32m                # the account is locked, so the form doesn't confirm which names exist.[m
+[32m+[m[32m                flash([m
+[32m+[m[32m                    "Wrong username or password. After 5 failed attempts an account "[m
+[32m+[m[32m                    "is locked for 15 minutes.",[m
+[32m+[m[32m                    "error",[m
+[32m+[m[32m                )[m
+[32m+[m[32m            elif send_code(user):[m
+[32m+[m[32m                session.clear()[m
+[32m+[m[32m                session["pending_uid"] = user["id"][m
+[32m+[m[32m                session["pending_at"] = time.time()[m
+[32m+[m[32m                session["code_tries"] = 0[m
+[32m+[m[32m                return redirect(url_for("verify"))[m
+[32m+[m[32m            return render_template("login.html", form=request.form)[m
+[32m+[m[32m        return render_template("login.html", form=request.form)[m
+[32m+[m
+[32m+[m[32m    @app.route("/login/verify", methods=["GET", "POST"])[m
+[32m+[m[32m    def verify():[m
+[32m+[m[32m        user = pending_user()[m
+[32m+[m[32m        if user is None:[m
+[32m+[m[32m            return redirect(url_for("login"))[m
+[32m+[m[32m        if users.is_locked(user):[m
+[32m+[m[32m            session.clear()[m
+[32m+[m[32m            flash("This account is locked for a while after too many failed attempts.", "error")[m
+[32m+[m[32m            return redirect(url_for("login"))[m
+[32m+[m
+[32m+[m[32m        if request.method == "POST":[m
+[32m+[m[32m            if throttled("verify", request.remote_addr):[m
+[32m+[m[32m                return render_template("verify.html", phone=mask_phone(user["number_phone"])), 429[m
+[32m+[m[32m            code = request.form.get("code", "").strip()[m
+[32m+[m[32m            session["code_tries"] = session.get("code_tries", 0) + 1[m
+[32m+[m[32m            if verifier.check(user["number_phone"], code):[m
+[32m+[m[32m                users.clear_failures(user["id"])[m
+[32m+[m[32m                events.record(user["id"], "login")[m
+[32m+[m[32m                session.clear()[m
+[32m+[m[32m                session["uid"] = user["id"][m
+[32m+[m[32m                session["epoch"] = user["session_epoch"][m
+[32m+[m[32m                session.permanent = True[m
+[32m+[m[32m                return redirect(url_for("dashboard"))[m
+[32m+[m[32m            locked = users.record_failure(user["id"], "code_failed")[m
+[32m+[m[32m            if locked or session["code_tries"] >= MAX_CODE_TRIES:[m
+[32m+[m[32m                session.clear()[m
+[32m+[m[32m                flash([m
+[32m+[m[32m                    "Too many wrong codes. "[m
+[32m+[m[32m                    + ("The account is locked for 15 minutes." if locked[m
+[32m+[m[32m                       else "Sign in again to get a new one."),[m
+[32m+[m[32m                    "error",[m
+[32m+[m[32m                )[m
+[32m+[m[32m                return redirect(url_for("login"))[m
+[32m+[m[32m            flash("That code didn't match.", "error")[m
+[32m+[m
+[32m+[m[32m        return render_template("verify.html", phone=mask_phone(user["number_phone"]))[m
+[32m+[m
+[32m+[m[32m    @app.route("/login/verify/resend", methods=["POST"])[m
+[32m+[m[32m    def resend():[m
+[32m+[m[32m        user = pending_user()[m
+[32m+[m[32m        if user is None:[m
+[32m+[m[32m            return redirect(url_for("login"))[m
+[32m+[m[32m        if throttled("resend", user["id"]):[m
+[32m+[m[32m            return redirect(url_for("verify"))[m
+[32m+[m[32m        if send_code(user):[m
+[32m+[m[32m            flash("A new code is on its way.", "ok")[m
+[32m+[m[32m        return redirect(url_for("verify"))[m
+[32m+[m
+[32m+[m[32m    @app.route("/account/password", methods=["GET", "POST"])[m
+[32m+[m[32m    @login_required[m
+[32m+[m[32m    def change_password():[m
+[32m+[m[32m        if request.method == "POST":[m
+[32m+[m[32m            if throttled("password", g.user["id"]):[m
+[32m+[m[32m                return render_template("change_password.html"), 429[m
+[32m+[m[32m            current = request.form.get("current", "")[m
+[32m+[m[32m            new = request.form.get("new", "")[m
+[32m+[m[32m            again = request.form.get("again", "")[m
+[32m+[m[32m            problem = validators.check_password(new, g.user["name"])[m
+[32m+[m[32m            if not users.verify_hash_passw(current, g.user["passw"]):[m
+[32m+[m[32m                if users.record_failure(g.user["id"], "current_password_failed"):[m
+[32m+[m[32m                    flash("Too many wrong passwords. The account is locked for 15 minutes.", "error")[m
+[32m+[m[32m                else:[m
+[32m+[m[32m                    flash("The current password is wrong.", "error")[m
+[32m+[m[32m            elif new != again:[m
+[32m+[m[32m                flash("The two new passwords don't match.", "error")[m
+[32m+[m[32m            elif new == current:[m
+[32m+[m[32m                flash("The new password is the same as the current one.", "error")[m
+[32m+[m[32m            elif problem:[m
+[32m+[m[32m                flash(problem, "error")[m
+[32m+[m[32m            else:[m
+[32m+[m[32m                session["epoch"] = users.set_password(g.user["id"], new)[m
+[32m+[m[32m                events.record(g.user["id"], "password_changed")[m
+[32m+[m[32m                flash("Password changed. Any other signed-in devices were signed out.", "ok")[m
+[32m+[m[32m                return redirect(url_for("dashboard"))[m
+[32m+[m[32m        return render_template("change_password.html")[m
+[32m+[m
+[32m+[m[32m    @app.route("/reset", methods=["GET", "POST"])[m
+[32m+[m[32m    def reset_request():[m
+[32m+[m[32m        if g.user:[m
+[32m+[m[32m            return redirect(url_for("dashboard"))[m
+[32m+[m[32m        if request.method == "POST":[m
+[32m+[m[32m            if throttled("reset", request.remote_addr):[m
+[32m+[m[32m                return render_template("reset_request.html"), 429[m
+[32m+[m[32m            name = request.form.get("username", "").strip()[m
+[32m+[m[32m            user = users.get_by_name(name) if name else None[m
+[32m+[m[32m            session.clear()[m
+[32m+[m[32m            session["reset_at"] = time.time()[m
+[32m+[m[32m            session["reset_tries"] = 0[m
+[32m+[m[32m            session["reset_uid"] = user["id"] if user else 0[m
+[32m+[m[32m            if user and not throttled("resend", user["id"]):[m
+[32m+[m[32m                try:[m
+[32m+[m[32m                    verifier.start(user["number_phone"])[m
+[32m+[m[32m                except sms.SMSError:[m
+[32m+[m[32m                    pass  # said nothing on purpose; see the message below[m
+[32m+[m[32m            # Identical reply for unknown names, so this page can't be used to[m
+[32m+[m[32m            # find out who has an account.[m
+[32m+[m[32m            flash("If that account exists, a code is on its way to its phone.", "ok")[m
+[32m+[m[32m            return redirect(url_for("reset_confirm"))[m
+[32m+[m[32m        return render_template("reset_request.html")[m
+[32m+[m
+[32m+[m[32m    @app.route("/reset/confirm", methods=["GET", "POST"])[m
+[32m+[m[32m    def reset_confirm():[m
+[32m+[m[32m        if "reset_at" not in session:[m
+[32m+[m[32m            return redirect(url_for("reset_request"))[m
+[32m+[m[32m        if time.time() - session["reset_at"] > SECOND_FACTOR_WINDOW:[m
+[32m+[m[32m            session.clear()[m
+[32m+[m[32m            flash("That reset timed out. Please start again.", "error")[m
+[32m+[m[32m            return redirect(url_for("reset_request"))[m
+[32m+[m
+[32m+[m[32m        if request.method == "POST":[m
+[32m+[m[32m            if throttled("verify", request.remote_addr):[m
+[32m+[m[32m                return render_template("reset_confirm.html"), 429[m
+[32m+[m[32m            user = users.get_by_id(session["reset_uid"]) if session["reset_uid"] else None[m
+[32m+[m[32m            code = request.form.get("code", "").strip()[m
+[32m+[m[32m            new = request.form.get("new", "")[m
+[32m+[m[32m            again = request.form.get("again", "")[m
+[32m+[m
+[32m+[m[32m            problem = validators.check_password(new, user["name"] if user else "")[m
+[32m+[m[32m            if new != again:[m
+[32m+[m[32m                problem = "The two passwords don't match."[m
+[32m+[m[32m            if problem:[m
+[32m+[m[32m                flash(problem, "error")  # checked first so a typo doesn't burn the code[m
+[32m+[m[32m                return render_template("reset_confirm.html")[m
+[32m+[m
+[32m+[m[32m            session["reset_tries"] += 1[m
+[32m+[m[32m            if user and verifier.check(user["number_phone"], code):[m
+[32m+[m[32m                users.set_password(user["id"], new)[m
+[32m+[m[32m                events.record(user["id"], "password_reset")[m
+[32m+[m[32m                session.clear()[m
+[32m+[m[32m                flash("Password changed. Sign in with the new one.", "ok")[m
+[32m+[m[32m                return redirect(url_for("login"))[m
+[32m+[m[32m            if session["reset_tries"] >= MAX_CODE_TRIES:[m
+[32m+[m[32m                session.clear()[m
+[32m+[m[32m                flash("Too many wrong codes. Start the reset again.", "error")[m
+[32m+[m[32m                return redirect(url_for("reset_request"))[m
+[32m+[m[32m            flash("That code wasn't accepted.", "error")[m
+[32m+[m[32m        return render_template("reset_confirm.html")[m
+[32m+[m
+[32m+[m[32m    @app.route("/logout", methods=["POST"])[m
+[32m+[m[32m    def logout():[m
+[32m+[m[32m        session.clear()[m
+[32m+[m[32m        flash("Signed out.", "ok")[m
+[32m+[m[32m        return redirect(url_for("login"))[m
+[32m+[m
+[32m+[m[32m    @app.route("/dashboard")[m
+[32m+[m[32m    @login_required[m
+[32m+[m[32m    def dashboard():[m
+[32m+[m[32m        return render_template([m
+[32m+[m[32m            "dashboard.html",[m
+[32m+[m[32m            phone=mask_phone(g.user["number_phone"]),[m
+[32m+[m[32m            activity=events.recent(g.user["id"]),[m
+[32m+[m[32m        )[m
+[32m+[m
+[32m+[m[32m    @app.errorhandler(403)[m
+[32m+[m[32m    def forbidden(_exc):[m
+[32m+[m[32m        return render_template([m
+[32m+[m[32m            "error.html",[m
+[32m+[m[32m            heading="That form has expired",[m
+[32m+[m[32m            detail="Reload the page and try again. If it keeps happening, check that cookies are enabled.",[m
+[32m+[m[32m        ), 403[m
+[32m+[m
+[32m+[m[32m    @app.errorhandler(404)[m
+[32m+[m[32m    def not_found(_exc):[m
+[32m+[m[32m        return render_template([m
+[32m+[m[32m            "error.html", heading="Page not found", detail="There is nothing at this address."[m
+[32m+[m[32m        ), 404[m
+[32m+[m
+[32m+[m[32m    return app[m
+[32m+[m
+[32m+[m
+[32m+[m[32mif __name__ == "__main__":[m
+[32m+[m[32m    create_app().run(debug=config.DEBUG)[m
